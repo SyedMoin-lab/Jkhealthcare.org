@@ -28,6 +28,13 @@ import {
   type DailyOfferCard as HeroDailyOfferCard,
 } from "@/lib/home-content";
 
+const offerTypes = [
+  "Daily Offers",
+  "Special Offers",
+  "Partner Offers",
+  "Passion Offers",
+];
+
 type HeroProps = {
   content?: HeroContent;
 };
@@ -35,8 +42,12 @@ type HeroProps = {
 function Hero({ content = defaultHeroContent }: HeroProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [carouselApi, setCarouselApi] = useState<CarouselApi | null>(null);
+  const [currentOfferIndex, setCurrentOfferIndex] = useState(0);
+  const [displayedText, setDisplayedText] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
   const hero = content;
 
+  // Carousel auto-scroll
   useEffect(() => {
     if (!carouselApi) {
       return;
@@ -50,6 +61,32 @@ function Hero({ content = defaultHeroContent }: HeroProps) {
 
     return () => clearInterval(interval);
   }, [carouselApi]);
+
+  // Typing animation effect
+  useEffect(() => {
+    const currentText = offerTypes[currentOfferIndex];
+    const typingSpeed = isDeleting ? 50 : 100;
+    const pauseDuration = 2000;
+
+    const timeout = setTimeout(() => {
+      if (!isDeleting) {
+        if (displayedText.length < currentText.length) {
+          setDisplayedText(currentText.slice(0, displayedText.length + 1));
+        } else {
+          setTimeout(() => setIsDeleting(true), pauseDuration);
+        }
+      } else {
+        if (displayedText.length > 0) {
+          setDisplayedText(displayedText.slice(0, -1));
+        } else {
+          setIsDeleting(false);
+          setCurrentOfferIndex((prev) => (prev + 1) % offerTypes.length);
+        }
+      }
+    }, typingSpeed);
+
+    return () => clearTimeout(timeout);
+  }, [displayedText, isDeleting, currentOfferIndex]);
 
   const offerCards = hero.dailyOfferCards.length
     ? hero.dailyOfferCards
@@ -105,14 +142,7 @@ function Hero({ content = defaultHeroContent }: HeroProps) {
 
               {/* DAILY OFFERS - Carousel */}
               <div className="w-full space-y-3">
-                <div className="flex items-center justify-between px-1">
-                  <p className="text-xs font-semibold uppercase tracking-[0.45em] text-muted-foreground">
-                    Daily Offers
-                  </p>
-                  <span className="text-[10px] uppercase tracking-[0.4em] text-muted-foreground/80">
-                    Auto-scroll
-                  </span>
-                </div>
+                <div className="flex items-center justify-between px-1"></div>
                 <div className="relative mx-auto w-full">
                   <Carousel
                     className="w-full pb-6"
