@@ -12,6 +12,10 @@ type StrapiMedia = {
   } | null;
 };
 
+type StrapiMediaRelation = {
+  data?: StrapiMedia | null;
+};
+
 type StrapiDoctorProfileAttributes = {
   name?: string | null;
   degrees?: string | null;
@@ -25,12 +29,7 @@ type StrapiDoctorProfileAttributes = {
   specialization?: string | null;
   super_specialization?: string | null;
   book_url?: string | null;
-  photo?:
-    | {
-        data?: StrapiMedia | null;
-      }
-    | StrapiMedia
-    | null;
+  photo?: StrapiMediaRelation | StrapiMedia | null;
 };
 
 type StrapiDoctorProfileDocument = {
@@ -101,6 +100,8 @@ const DEFAULT_DOCTORS: DoctorProfile[] = [
   },
 ];
 
+const DOCTOR_PROFILES_REVALIDATE_SECONDS = 300;
+
 function splitList(value: Nullable<string>): string[] {
   if (!value) {
     return [];
@@ -112,19 +113,48 @@ function splitList(value: Nullable<string>): string[] {
     .filter(Boolean);
 }
 
+function hasMediaData(
+  media: Nullable<StrapiDoctorProfileAttributes["photo"]>
+): media is StrapiMediaRelation {
+  if (!media || typeof media !== "object") {
+    return false;
+  }
+
+  return "data" in media;
+}
+
+function normalizeMedia(
+  media: Nullable<StrapiDoctorProfileAttributes["photo"]>
+): Nullable<StrapiMedia> {
+  if (!media) {
+    return null;
+  }
+
+  if (hasMediaData(media)) {
+    return media.data ?? null;
+  }
+
+  return media;
+}
+
 function extractPhoto(media: Nullable<StrapiDoctorProfileAttributes["photo"]>) {
   if (!media) {
     return undefined;
   }
 
-  const data = "data" in media ? media.data : media;
+  const data = normalizeMedia(media);
   const url = data?.attributes?.url ?? data?.url ?? undefined;
   if (!url) {
     return undefined;
   }
 
+  const resolvedUrl = resolveStrapiAssetUrl(url);
+  if (!resolvedUrl) {
+    return undefined;
+  }
+
   return {
-    src: resolveStrapiAssetUrl(url),
+    src: resolvedUrl,
     alt:
       data?.attributes?.alternativeText ?? data?.alternativeText ?? undefined,
   };
@@ -165,7 +195,7 @@ export async function loadDoctorProfiles(): Promise<DoctorProfile[]> {
   try {
     const response = await fetchStrapi<StrapiDoctorProfileResponse>(
       "/api/doctor-profiles?populate=photo",
-      { cache: "no-store" }
+      { revalidate: DOCTOR_PROFILES_REVALIDATE_SECONDS }
     );
 
     const entries = response.data ?? [];

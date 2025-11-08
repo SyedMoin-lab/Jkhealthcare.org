@@ -89,7 +89,7 @@ function Hero({ content = defaultHeroContent }: HeroProps) {
                   <span className="bg-gradient-to-br from-foreground via-foreground to-foreground/70 bg-clip-text text-transparent block">
                     {hero.title.lead}
                   </span>
-                  <span className="text-[#a855f7] underline decoration-[#a855f7] decoration-2 underline-offset-2 sm:underline-offset-4 block mt-1">
+                  <span className="text-blue-500 underline decoration-white decoration-2 underline-offset-2 sm:underline-offset-4 block mt-1">
                     {hero.title.highlight}
                   </span>
                   <span className="bg-gradient-to-br from-foreground via-foreground to-foreground/70 bg-clip-text text-transparent block mt-1">

@@ -162,21 +162,17 @@ type StrapiAiCard = {
   } | null;
 };
 
-type StrapiSingleTypeDocument<
-  TAttributes extends Record<string, unknown>,
-> = {
+type StrapiSingleTypeDocument<TAttributes extends Record<string, unknown>> = {
   id?: number;
   documentId?: string;
   attributes?: TAttributes | null;
 } & Partial<TAttributes>;
 
-type StrapiSingleTypeResponse<
-  TAttributes extends Record<string, unknown>,
-> = {
+type StrapiSingleTypeResponse<TAttributes extends Record<string, unknown>> = {
   data?: StrapiSingleTypeDocument<TAttributes> | null;
 };
 
-interface StrapiHomeHeroAttributes {
+interface StrapiHomeHeroAttributes extends Record<string, unknown> {
   hero_badge_label?: string | null;
   hero_heading_lead?: string | null;
   hero_heading_highlight?: string | null;
@@ -214,14 +210,14 @@ type StrapiDailyOfferCard = {
   accent_color?: string | null;
 };
 
-interface StrapiHomeFaqAttributes {
+interface StrapiHomeFaqAttributes extends Record<string, unknown> {
   faq_badge?: string | null;
   faq_heading?: string | null;
   faq_description?: string | null;
   faq_items?: StrapiFaqEntry[] | null;
 }
 
-interface StrapiHomeCtaAttributes {
+interface StrapiHomeCtaAttributes extends Record<string, unknown> {
   cta_heading?: string | null;
   cta_description?: string | null;
   cta_primary_label?: string | null;
@@ -230,7 +226,7 @@ interface StrapiHomeCtaAttributes {
   cta_secondary_message?: string | null;
 }
 
-interface StrapiHomeFeaturesAttributes {
+interface StrapiHomeFeaturesAttributes extends Record<string, unknown> {
   features_badge?: string | null;
   features_heading_primary?: string | null;
   features_heading_secondary?: string | null;
@@ -240,7 +236,7 @@ interface StrapiHomeFeaturesAttributes {
   features_footer_description?: string | null;
 }
 
-interface StrapiHomePricingAttributes {
+interface StrapiHomePricingAttributes extends Record<string, unknown> {
   pricing_badge_label?: string | null;
   pricing_heading_primary?: string | null;
   pricing_heading_secondary?: string | null;
@@ -248,7 +244,7 @@ interface StrapiHomePricingAttributes {
   pricing_plans?: StrapiPricingPlan[] | null;
 }
 
-interface StrapiHomeAiAttributes {
+interface StrapiHomeAiAttributes extends Record<string, unknown> {
   ai_badge_label?: string | null;
   ai_heading_primary?: string | null;
   ai_heading_secondary?: string | null;
@@ -813,18 +809,61 @@ export const defaultAiContent: AiContent = {
       "Speak naturally about your health concerns. Our AI understands symptoms, provides guidance, and connects you with the right healthcare professionals.",
   },
 };
+
+const FALLBACK_HOME_CONTENT: HomeContent = {
+  hero: defaultHeroContent,
+  faq: defaultFaqContent,
+  cta: defaultCtaContent,
+  features: defaultFeaturesContent,
+  pricing: defaultPricingContent,
+  ai: defaultAiContent,
+};
+
+const STRAPI_HOME_RETRY_DELAY_MS = 60_000;
+let skipHomeContentFetchUntil = 0;
+let hasLoggedHomeContentError = false;
+let hasLoggedHomeContentCooldownNotice = false;
+
+function getFallbackHomeContent(): HomeContent {
+  return FALLBACK_HOME_CONTENT;
+}
+
+function logHomeContentFailure(error: unknown) {
+  if (!hasLoggedHomeContentError) {
+    console.error("Failed to load Strapi home content:", error);
+    hasLoggedHomeContentError = true;
+    hasLoggedHomeContentCooldownNotice = false;
+  }
+}
+
+function logCooldownNotice() {
+  if (hasLoggedHomeContentCooldownNotice) {
+    return;
+  }
+
+  const remaining = Math.max(0, skipHomeContentFetchUntil - Date.now());
+  const seconds = Math.ceil(remaining / 1000);
+  console.warn(
+    `Skipping Strapi home content fetches for ${seconds}s after repeated failures. Serving static defaults.`
+  );
+  hasLoggedHomeContentCooldownNotice = true;
+}
+
 export async function loadHomeContent(fetchOptions?: {
   revalidate?: number;
 }): Promise<HomeContent> {
+  if (skipHomeContentFetchUntil > 0 && Date.now() < skipHomeContentFetchUntil) {
+    logCooldownNotice();
+    return getFallbackHomeContent();
+  }
+
   try {
     const heroPath = buildSingleTypeRequestPath("/api/home-hero", [
       "hero_stats",
       "hero_testimonial_avatars",
       "daily_offer_cards",
     ]);
-    const faqPath = buildSingleTypeRequestPath("/api/home-faq", [
-      "faq_items",
-    ]);
+    const faqPath = buildSingleTypeRequestPath("/api/home-faq", ["faq_items"]);
     const featuresPath = buildSingleTypeRequestPath("/api/home-features", [
       "features_cards",
     ]);
@@ -860,26 +899,28 @@ export async function loadHomeContent(fetchOptions?: {
     ]);
 
     const heroAttributes = extractAttributes<StrapiHomeHeroAttributes>(
-      heroResponse?.data,
+      heroResponse?.data
     );
     const faqAttributes = extractAttributes<StrapiHomeFaqAttributes>(
-      faqResponse?.data,
+      faqResponse?.data
     );
     const ctaAttributes = extractAttributes<StrapiHomeCtaAttributes>(
-      ctaResponse?.data,
+      ctaResponse?.data
     );
     const featuresAttributes = extractAttributes<StrapiHomeFeaturesAttributes>(
-      featuresResponse?.data,
+      featuresResponse?.data
     );
     const pricingAttributes = extractAttributes<StrapiHomePricingAttributes>(
-      pricingResponse?.data,
+      pricingResponse?.data
     );
     const aiAttributes = extractAttributes<StrapiHomeAiAttributes>(
-      aiResponse?.data,
+      aiResponse?.data
     );
 
-    return {
-      hero: heroAttributes ? mapHeroContent(heroAttributes) : defaultHeroContent,
+    const content = {
+      hero: heroAttributes
+        ? mapHeroContent(heroAttributes)
+        : defaultHeroContent,
       faq: faqAttributes ? mapFaqContent(faqAttributes) : defaultFaqContent,
       cta: ctaAttributes ? mapCtaContent(ctaAttributes) : defaultCtaContent,
       features: featuresAttributes
@@ -890,22 +931,20 @@ export async function loadHomeContent(fetchOptions?: {
         : defaultPricingContent,
       ai: aiAttributes ? mapAiContent(aiAttributes) : defaultAiContent,
     };
+    skipHomeContentFetchUntil = 0;
+    hasLoggedHomeContentError = false;
+    hasLoggedHomeContentCooldownNotice = false;
+    return content;
   } catch (error) {
-    console.error("Failed to load Strapi home content:", error);
-    return {
-      hero: defaultHeroContent,
-      faq: defaultFaqContent,
-      cta: defaultCtaContent,
-      features: defaultFeaturesContent,
-      pricing: defaultPricingContent,
-      ai: defaultAiContent,
-    };
+    logHomeContentFailure(error);
+    skipHomeContentFetchUntil = Date.now() + STRAPI_HOME_RETRY_DELAY_MS;
+    return getFallbackHomeContent();
   }
 }
 
 function buildSingleTypeRequestPath(
   basePath: string,
-  populateFields: string[],
+  populateFields: string[]
 ) {
   if (populateFields.length === 0) {
     return basePath;
@@ -953,12 +992,10 @@ function mapHeroContent(attributes: StrapiHomeHeroAttributes): HeroContent {
         attributes.hero_offer_hospital?.trim() ??
         dailyOfferDefaults.hospitalName,
       contactNumber:
-        attributes.hero_offer_phone?.trim() ??
-        dailyOfferDefaults.contactNumber,
+        attributes.hero_offer_phone?.trim() ?? dailyOfferDefaults.contactNumber,
       discount:
         attributes.hero_offer_discount?.trim() ?? dailyOfferDefaults.discount,
-      price:
-        attributes.hero_offer_price?.trim() ?? dailyOfferDefaults.price,
+      price: attributes.hero_offer_price?.trim() ?? dailyOfferDefaults.price,
       highlights:
         offerHighlights.length > 0
           ? offerHighlights
@@ -986,7 +1023,7 @@ function mapHeroContent(attributes: StrapiHomeHeroAttributes): HeroContent {
 }
 
 function mapDailyOfferCards(
-  cards: Nullable<StrapiDailyOfferCard[]>,
+  cards: Nullable<StrapiDailyOfferCard[]>
 ): DailyOfferCard[] {
   if (!Array.isArray(cards)) {
     return [];
@@ -1008,8 +1045,8 @@ function mapDailyOfferCards(
       typeof entry.rating === "number"
         ? entry.rating
         : typeof entry.rating === "string" && entry.rating.trim().length > 0
-          ? Number(entry.rating)
-          : undefined;
+        ? Number(entry.rating)
+        : undefined;
 
     results.push({
       id: entry.id ?? Math.floor(Math.random() * 100000),
@@ -1036,7 +1073,7 @@ function mapDailyOfferCards(
 }
 
 function sanitiseOfferHighlights(
-  attributes: StrapiHomeHeroAttributes,
+  attributes: StrapiHomeHeroAttributes
 ): HeroContent["dailyOffer"]["highlights"] {
   const highlights: HeroContent["dailyOffer"]["highlights"] = [];
 
@@ -1070,8 +1107,8 @@ function sanitiseStats(stats: Nullable<StrapiStatEntry[]>): HeroStat[] {
       typeof rawValue === "number"
         ? rawValue
         : rawValue !== null && rawValue !== undefined
-          ? Number(rawValue)
-          : Number.NaN;
+        ? Number(rawValue)
+        : Number.NaN;
 
     if (!label || Number.isNaN(numericValue)) {
       continue;
@@ -1127,8 +1164,8 @@ function sanitiseAvatars(field: Nullable<StrapiMediaField>): HeroAvatar[] {
   const items = Array.isArray(field)
     ? field
     : Array.isArray(field?.data)
-      ? field.data
-      : null;
+    ? field.data
+    : null;
   if (!Array.isArray(items)) {
     return [];
   }
@@ -1202,7 +1239,7 @@ function mapCtaContent(attributes: StrapiHomeCtaAttributes): CtaContent {
 }
 
 function mapFeaturesContent(
-  attributes: StrapiHomeFeaturesAttributes,
+  attributes: StrapiHomeFeaturesAttributes
 ): FeaturesContent {
   const cards = sanitiseFeatureCards(attributes.features_cards);
 
@@ -1227,7 +1264,7 @@ function mapFeaturesContent(
 }
 
 function mapPricingContent(
-  attributes: StrapiHomePricingAttributes,
+  attributes: StrapiHomePricingAttributes
 ): PricingContent {
   const plans = sanitisePricingPlans(attributes.pricing_plans);
 
@@ -1269,7 +1306,7 @@ function mapAiContent(attributes: StrapiHomeAiAttributes): AiContent {
   };
 }
 function sanitiseFeatureCards(
-  entries: Nullable<StrapiFeatureCard[]>,
+  entries: Nullable<StrapiFeatureCard[]>
 ): FeatureCard[] {
   if (!Array.isArray(entries)) {
     return [];
@@ -1292,7 +1329,7 @@ function sanitiseFeatureCards(
   return cards;
 }
 function sanitisePricingPlans(
-  entries: Nullable<StrapiPricingPlan[]>,
+  entries: Nullable<StrapiPricingPlan[]>
 ): PricingPlan[] {
   if (!Array.isArray(entries)) {
     return [];
@@ -1337,7 +1374,7 @@ function sanitisePricingPlans(
   }, []);
 }
 function sanitisePricingPlanFeatures(
-  entries: Nullable<StrapiPricingPlanFeature[]>,
+  entries: Nullable<StrapiPricingPlanFeature[]>
 ): string[] {
   if (!Array.isArray(entries)) {
     return [];
@@ -1428,7 +1465,7 @@ function sanitiseTextItems(entries: Nullable<StrapiAiTextItem[]>): string[] {
   return values;
 }
 function sanitiseTimeline(
-  entries: Nullable<StrapiAiTimelineEntry[]>,
+  entries: Nullable<StrapiAiTimelineEntry[]>
 ): AiTimelineEntry[] {
   if (!Array.isArray(entries)) {
     return [];
@@ -1465,8 +1502,8 @@ function sanitiseMetrics(entries: Nullable<StrapiAiMetric[]>): AiMetric[] {
       typeof rawValue === "number"
         ? rawValue
         : typeof rawValue === "string"
-          ? Number(rawValue.trim())
-          : Number.NaN;
+        ? Number(rawValue.trim())
+        : Number.NaN;
 
     if (!label || Number.isNaN(numericValue)) {
       continue;
@@ -1483,7 +1520,7 @@ function sanitiseMetrics(entries: Nullable<StrapiAiMetric[]>): AiMetric[] {
   return metrics;
 }
 function sanitiseStatistic(
-  entry: Nullable<StrapiAiStatistic>,
+  entry: Nullable<StrapiAiStatistic>
 ): AiStatistic | null {
   if (!entry) {
     return null;
@@ -1509,7 +1546,7 @@ function sanitiseStatistic(
 }
 
 function normaliseButtonVariant(
-  value: Nullable<string>,
+  value: Nullable<string>
 ): PricingPlanButtonVariant {
   switch ((value ?? "").toLowerCase()) {
     case "primary":
@@ -1550,7 +1587,7 @@ function normaliseAiSize(value: Nullable<string>): "sm" | "md" | "lg" {
 }
 
 function extractAttributes<T extends Record<string, unknown>>(
-  source: Nullable<T & { attributes?: T | null }>,
+  source: Nullable<T & { attributes?: T | null }>
 ): T | null {
   if (!source) {
     return null;
